@@ -1,0 +1,192 @@
+---
+title: "Covid 19 testing"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+setwd("~/Desktop/DA")
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(Hmisc)
+library(knitr)
+library(ggthemes)
+covid <- read_csv('Tests_conducted_15April2020.csv')
+world_pop <- read_csv('countries of the world.csv')
+```
+
+Introduction:
+
+We are all aware of the circumstances present at this time: non-essential workers are stuck working from home, students around the world have been sent home and are forced to study online, and the US economy is seeing its worst days since the Great Depression. These are facts of the matter and it is now up to us to determine what comes next. What questions should we be asking? What are we trying to achieve? How do we determine what is a success? 
+
+Discussion:
+
+One answer to these questions may come down to the number of tests allocated to countries. Right now, there is no country that has as many tests as they do population. That creates some trouble when trying to figure out who actually has the virus because we can’t confirm whether people do have the virus. Also, all data on the virus is based around “confirmed cases” which the World Health Organization defines as positive tests performed in a laboratory setting. This number is presumably much lower than the actual number of confirmed cases since (1) the virus is asymptomatic for about 2 weeks and (2) we don’t have enough tests to allocate a test for every citizen and likely won’t have the resources to make 7.8 billion by the time the virus has stopped spreading. The number of tests as well as the rate of false negatives and positives can be a very useful tool in determining how well the spread of the virus is progressing. The question I will be asking is as follows: Using the number of tests and success rate of those tests, can we determine the predicted number of positive cases is a country? From there, can we say if there is a relationship between the number of tests available to a country and the number of positive covid-19 cases. 
+
+```{r}
+summary(covid)
+glimpse(covid)
+glimpse(world_pop)
+```
+
+From the Date column we can see that this dataset was updated on April 15 so it won't be as up to date as we might've liked, but still a fairly recent dataset. We will want to mostly use data per million population becuase they will give us more uniform values between different countries.
+
+```{r}
+clean_covid <- covid %>%
+  select(`Country or region`, Positive, `%`, `Tests /millionpeople`, `Positive /millionpeople`) %>%
+  filter(`Country or region` != 'China') %>% #Removing China since it is only a row of NA's. Could be due to their lack of transparency with testing, etc. 
+  rename(Country = `Country or region`) #renaming the country column to match the population name
+  
+
+population <- world_pop %>%
+  select(Country, Population) #selecting only the country and population from the world_pop dataset
+
+summary(clean_covid)
+summary(population)
+
+df <- merge(clean_covid, population, by = 'Country') #creating one dataset of covid data and population by country
+
+summary(df)
+```
+
+It is worth noting that the population data that I am using is from 2018. Since then the world population has increased from 7.6E+09 to 7.8E+09. ((7.8E+09 - 7.6E+09) * 100)/(7.6E+09) = 2.63%. If we assume that this rate is uniform accross all countries we can apply that to these popluations to get a better estimate of where we are at currently. 
+
+```{r}
+df <- df %>%
+  mutate(Population2020 = (df$Population*1.0263))
+
+glimpse(df$Population)
+glimpse(df$Population2020)
+
+df <- df %>%
+  select(-Population) %>%
+  rename(Population = Population2020)
+
+glimpse(df$Population)
+```
+
+Now that we have the updated population we are able to proceed with analysis. 
+
+```{r}
+df %>%
+  ggplot(aes(x = `Country`, y = `Tests /millionpeople`, fill = `Country`)) +
+  stat_summary(fun.y = "mean", geom = "bar") +
+  stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", fun.args = list(conf.int = .95), width = 0.35) +
+  theme(legend.position = "none") +
+  labs(x = "Country", y = "Tests per Million Population", title = "Tests per Million Population by Country") +
+theme(axis.text.x = element_text(angle = -50, hjust = 0, vjust = 0.5)) 
+
+df1 <- df %>%
+  filter(`Tests /millionpeople` > 15000)
+
+df1 %>%
+  ggplot(aes(x = `Country`, y = `Tests /millionpeople`, fill = `Country`)) +
+  stat_summary(fun.y = "mean", geom = "bar") +
+  stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", fun.args = list(conf.int = .95), width = 0.35) +
+  theme(legend.position = "none") +
+  labs(x = "Country", y = "Tests per Million Population", title = "Tests per Million Population by Country") +
+theme(axis.text.x = element_text(angle = -50, hjust = 0, vjust = 0.5)) 
+
+summary(df1)
+mean(df$`Tests /millionpeople`)
+```
+
+So, from this graph we can see that, at best, a country only has tests for 10% of it's population. Even then, countries with tests for more than 1.5% of it's population have an median population of only 4,450,578, much less than the population of even Ohio. The for all countries an average of only about 1% of the population can be tested. This figure seems staggeringly low. We have only produced enough tests for 1% of the worlds population? Currently there is a total of 2,500,000 confirmed cases meaning that about 0.03% of the worlds population have confirmed cases. 
+
+```{r}
+df <- df %>%
+  mutate(rate = (`Positive /millionpeople`/`Tests /millionpeople`)) %>%
+  mutate(cases = rate*Population)
+
+mean(df$rate)*100
+sum(df$Positive) - sum(df$cases)
+```
+
+We can tell from this that the average percentage of tests that give a positive result is about 10%. Using this rate of positive cases we can find the expected number of cases if we had the means of testing the whole population. This gives us a value of 401,003,207, 5.14% of the world population, a difference of 5.11%. 
+
+```{r}
+df <- df %>%
+  mutate(percentage = (cases/Population)*100)
+
+df %>%
+  ggplot(aes(x = `Country`, y = percentage, fill = `Country`)) +
+  stat_summary(fun.y = "mean", geom = "bar") +
+  stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", fun.args = list(conf.int = .95), width = 0.35) +
+  theme(legend.position = "none") +
+  labs(x = "Country", y = "Predicted Percentage of Population with Covid19", title = "Predicted percentage of Population that has Covid19 by Country") +
+theme(axis.text.x = element_text(angle = -50, hjust = 0, vjust = 0.5)) 
+
+df2 <- df %>%
+  filter(percentage > 20)
+
+df2 %>%
+  ggplot(aes(x = `Country`, y = percentage, fill = `Country`)) +
+  stat_summary(fun.y = "mean", geom = "bar") +
+  stat_summary(fun.data = "mean_cl_normal", geom = "errorbar", fun.args = list(conf.int = .95), width = 0.35) +
+  theme(legend.position = "none") +
+  labs(x = "Country", y = "Predicted Percentage of Population with Covid19", title = "Predicted percentage of Population that has Covid19 by Country") +
+theme(axis.text.x = element_text(angle = -50, hjust = 0, vjust = 0.5)) 
+```
+
+geom_point() tests/million vs. predicted cases/million
+
+```{r}
+df3 <- df %>%
+  mutate(casesPerMil = cases/1000000)
+
+df4 <- df2 %>%
+  mutate(casesPerMil = cases/1000000)
+
+df3 %>%
+  ggplot(aes(x = `Tests /millionpeople`, y = casesPerMil)) + 
+  geom_point()
+
+df4 %>%
+  ggplot(aes(x = `Tests /millionpeople`, y = casesPerMil)) + 
+  geom_point()
+```
+
+```{r}
+df5 <- df3 %>%
+  filter(`Tests /millionpeople` > 75000)
+
+glimpse(df5)
+
+df6 <- df3 %>%
+  filter(casesPerMil > 40)
+
+glimpse(df6)
+```
+
+```{r}
+covidREG <- lm(casesPerMil ~ `Tests /millionpeople`, df3)
+summary(covidREG)
+
+covidREG2 <- lm(casesPerMil ~ `Tests /millionpeople`, df4)
+summary(covidREG2)
+
+covidREG1 <- lm(`Positive /millionpeople` ~ `Tests /millionpeople`, df)
+summary(covidREG1)
+```
+
+We get a p value of 0.1226. With an alpha of 0.05 we fail to reject the null that there is no relationship between the number of tests per million population and the predicted positive number of cases per million population. This This indicates that there may be some kind of relationship between the number of tests per million population and the number of predicted positive cases per million population. However, we have a very low R squared value. The R-squared value indicates that approximately 3.15% of the variation in the the predicted positive number of cases per million population is predicted by our linear regression. 
+
+In the next regression, this time using the countries which have the highest predicted percentage of their country infected, we get a p value of 0.7473. With an alpha of 0.05 we fail to reject the null that there is no relationship between the number of tests per million population and the predicted positive number of cases per million population. This This indicates that there may be some kind of relationship between the number of tests per million population and the number of predicted positive cases per million population in the countries that are predicted to have the largest percentage of their population infected. However, we have a very low R squared value. The R-squared value indicates that approximately 1.58% of the variation in the the predicted positive number of cases per million population is predicted by our linear regression. 
+
+Running another regression, this time with the number of positive cases per million population we get a p value of 3.885E-09. We reject the null that there is a relationship between the number of positive cases per million population and the number of tests per million population. Although, this time we get a higher R squared value. The R-squared value indicates that approximately 36.37% of the variation in the the  positive number of cases per million population is predicted by our linear regression.
+
+From both of the p values we gathered from statistical analysis of number of tests per million population and the number of predicted positive cases per million population we can see that there may in fact be a relationship between these two variables. Although this correltation does not imply causation, it is suggesting that the more tests a country has per million of its population, the lower the number of cases per million of its population will be. 
+
+Besides statistical evidence, we can see that countries such as Iceland with the most tests per million of its population have very little cases whereas India and the U.S. have some of the lowest values of tests per million of population and they subsequently have the highest number of predicted positive cases per million population. Although low test numbers don't always correlate to a higher number of predicted cases (i.e. the large clump of points near the origin), it is clear that as the number of tests available to a country increases, the predicted number of cases will decrease.
+
+We can't be sure whether more testing in countries that already have a high number of people infected would decrease the prediction, but I would still advise the implementation of more testing across the country. If we can find out who has been infected, it will be easier to have those infected quarantine themselves. Research on a vaccine for covid-19 is undoubtedly an important part in the measures being taken, however, focusing more effort into the production of tests will be more useful in the long run. The earlier we can test most of the population, the earlier those not infected can begin to come back to society as we once knew. Those who are not tested however should remain in quarantine. Moreover, even if you have been tested, the safest thing to do is stay home. You never know who you could come into contact with and whether themselves or someone they've been in contact with are infected. If you have been tested and come back negative, interacting with others who have not been tested will do nothing but cause uncertainty in the test result. You now would have no idea if you are infected or not. Ultimately, until we have enough tests to test a large part of our population, we should keep stay-at-home orders in effect. 
+
+
+
+
